@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python
 
 import rospy
@@ -5,19 +6,14 @@ import actionlib
 from geometry_msgs.msg import Twist
 from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
 from std_msgs.msg import Int8
-import threading
-import sys
-import select
-import termios
-import tty
+from enum import Enum
 
-
-# Node Initialisation
-rospy.init_node('goal_pose') #initializes the ROS node with the name "goal_pose"
-
-# Global variables
-g_num = None 
-
+# Define an enum class for goal status
+class GoalStatus(Enum):
+    SUCCEEDED = 3
+    CANCELLED = 2
+    PREEMPTED = 8
+    ABORTED = 4
 
 # Coordinates for respective landmarks
 coords = [[-0.386695382833, 0.0424879298046, 0.0, 0.0, 0.0, -0.00250490153905, 0.999996862729], #index 0 ORGIN 
@@ -31,16 +27,15 @@ coords = [[-0.386695382833, 0.0424879298046, 0.0, 0.0, 0.0, -0.00250490153905, 0
           [0.425864884563, 1.56001601173, 0.0, 0.0, 0.0, 0.95305514272, 0.302796788186]] #Index 8 iFly/Luge
 
 # Callback function definitions
-def active_cb(extra = 0):
+def active_cb(extra=0):
     rospy.loginfo("Goal pose being processed")
 
 # the callback for monitoring the progress of the navigation goal. It checks for the presence of a message on the "/stopButton" topic, 
 # which presumably signals the user wants to stop the current navigation goal. 
 # If the message with data 10 is received, it calls the stop() function.
 def feedback_cb(feedback):
-    print("press s to stop")
+    print("Press 's' to stop")
     myval = rospy.wait_for_message('/stopButton', Int8)
-    
     if myval.data == 10:
         print(myval)
         stop()
@@ -48,55 +43,42 @@ def feedback_cb(feedback):
 # the callback called when the navigation goal reaches a final state (either succeeded, aborted, or canceled). 
 # It logs information based on the status received.
 def done_cb(status, result):
-    if status == 3:
+    status_enum = GoalStatus(status)
+    if status_enum == GoalStatus.SUCCEEDED:
         rospy.loginfo("Goal reached")
-    if status == 2 or status == 8:
+    elif status_enum in [GoalStatus.CANCELLED, GoalStatus.PREEMPTED]:
         rospy.loginfo("Goal cancelled")
-    if status == 4:
+    elif status_enum == GoalStatus.ABORTED:
         rospy.loginfo("Goal aborted")
-
 
 # Function definitions
 
-# waits for a message on the topic "/button" (a topic that presumably receives button presses or commands). 
-# Once a message is received, it returns the data from the message (the index of the area to navigate to) and stores it in the command variable.
-def gui_listener():
-
-    message = rospy.wait_for_message('/button', Int8)
-    return_val = message.data
-    return return_val
-    
-# creates a SimpleActionClient for the "move_base" action server (used for navigation) and sends a request to cancel all active goals, effectively stopping the robot's movement.
+# Function to send a stop request to cancel all active goals
 def stop():
-    navclient = actionlib.SimpleActionClient('move_base',MoveBaseAction)
     print("Stop goal sent")
     navclient.cancel_all_goals()
-    
-# to send the navigation goal to the action server using a separate thread.
-def navclient_thread(navclient, goal):
-   navclient.send_goal(goal, done_cb, active_cb, feedback_cb)
 
-# to wait for the result of the navigation goal using a separate thread
-def result_thread(navclient):
+# Function to send a navigation goal to the action server
+def send_goal(navclient, goal):
+    navclient.send_goal(goal, done_cb=done_cb, active_cb=active_cb, feedback_cb=feedback_cb)
+
+# Function to wait for the result of a navigation goal
+def wait_for_result(navclient):
     finished = navclient.wait_for_result()
     if not finished:
         rospy.logerr("Action server not available!")
     else:
-        rospy.loginfo ( navclient.get_result())
+        rospy.loginfo(navclient.get_result())
 
-# initializes the SimpleActionClient for the "move_base" action server, waits for the server to be available, 
-# creates a navigation goal based on the provided coordList, and sends the goal to the server using a separate thread. 
-# Then, it waits for the result of the navigation goal using another thread.
+# Function to navigate to a specific landmark based on its coordinates
 def sui(coordList):
-    navclient = actionlib.SimpleActionClient('move_base',MoveBaseAction)
-    rospy.loginfo("waiting for server")
+    rospy.loginfo("Waiting for server")
     navclient.wait_for_server()
-    rospy.loginfo("server found")
-    # Example of navigation goal
+    rospy.loginfo("Server found")
+
     goal = MoveBaseGoal()
     goal.target_pose.header.frame_id = "map"
     goal.target_pose.header.stamp = rospy.Time.now()
-
     goal.target_pose.pose.position.x = coordList[0]
     goal.target_pose.pose.position.y = coordList[1]
     goal.target_pose.pose.position.z = coordList[2]
@@ -105,26 +87,22 @@ def sui(coordList):
     goal.target_pose.pose.orientation.z = coordList[5]
     goal.target_pose.pose.orientation.w = coordList[6]
 
-    navclient_thread(navclient, goal)
-    result_thread(navclient)
+    send_goal(navclient, goal)
+    wait_for_result(navclient)
 
-#----------------------------------------------------------------------
-while True:
-    """
-    val = input(
-  "[0] Origin\n"
-  "[1] Sentosa\n"
-  "[2] Wings of Time\n"
-  "[3] Universal Studios\n"
-  "[4] SEA Aquarium\n"
-  "[5] Fort Siloso\n"
-  "[6] Merlion\n"
-  "[7] Rainbow Reef\n"
-  "[8] iFly/Luge\n"
-  "\n"
-  "enter index of area: ")
-    """
-    command = gui_listener()
+# waits for a message on the topic "/button" (a topic that presumably receives button presses or commands). 
+# Once a message is received, it returns the data from the message (the index of the area to navigate to) and stores it in the command variable.
+def gui_listener():
+    message = rospy.wait_for_message('/button', Int8)
+    return_val = message.data
+    return return_val
 
-    if command != None:
-        sui(coords[command])
+if __name__ == "__main__":
+    rospy.init_node('goal_pose') #initializes the ROS node with the name "goal_pose"
+    navclient = actionlib.SimpleActionClient('move_base', MoveBaseAction)
+    while not rospy.is_shutdown():
+        print("Select zone.....")
+        command = gui_listener()
+        if command is not None:
+            sui(coords[command])
+
