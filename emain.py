@@ -13,67 +13,13 @@ import tty
 
 
 # Node Initialisation
-rospy.init_node('goal_pose')
+rospy.init_node('goal_pose') #initializes the ROS node with the name "goal_pose"
 
 # Global variables
-g_num = None
+g_num = None 
 
-# Callbacks definition
-def active_cb(extra = 0):
-    rospy.loginfo("Goal pose being processed")
 
-# def gui_callback(num):
-#    global g_num
-#    g_num = num.data
-#    rospy.loginfo("Received message: %s", num.data)
-
-def gui_listener():
-    #global g_num
-    #rospy.Subscriber('/button', Int8, gui_callback)
-    message = rospy.wait_for_message('/button', Int8)
-    return_val = message.data
-    #g_num = None
-    return return_val
-    
-
-def stop():
-    navclient = actionlib.SimpleActionClient('move_base',MoveBaseAction)
-    print("Stop goal sent")
-    navclient.cancel_all_goals()
-    
-
-def feedback_cb(feedback):
-    print("press s to stop")
-    myval = rospy.wait_for_message('/stopButton', Int8)
-    
-    #myval = getKey(rospy.get_param("~key_timeout", 0.05))
-    #print("my val is: " + myval)
-    if myval.data == 10:
-        print(myval)
-        stop()
-    #rospy.loginfo("Current location: "+str(feedback))
-
-def done_cb(status, result):
-    if status == 3:
-        rospy.loginfo("Goal reached")
-    if status == 2 or status == 8:
-        rospy.loginfo("Goal cancelled")
-    if status == 4:
-        rospy.loginfo("Goal aborted")
-    
-# def getKey(key_timeout):
-#     settings = termios.tcgetattr(sys.stdin)
-#     tty.setraw(sys.stdin.fileno())
-#     rlist, _, _ = select.select([sys.stdin], [], [], key_timeout)
-#     if rlist:
-#         key = sys.stdin.read(1)
-#     else:
-#         key = ''
-#     termios.tcsetattr(sys.stdin, termios.TCSADRAIN, settings)
-#     return key
-
-# Coord Base
-#x,y,z(coords) xyzw(pos) 
+# Coordinates for respective landmarks
 coords = [[-0.386695382833, 0.0424879298046, 0.0, 0.0, 0.0, -0.00250490153905, 0.999996862729], #index 0 ORGIN 
           [-1.69126015951, -0.0463478109254, 0.0, 0.0, 0.0, -0.997993223511, 0.0633208166852], #index 1 SENTOSA
           [-1.62103342139, -1.397156136, 0.0, 0.0, 0.0, 0.964335910138, 0.264681416837], #index 2 WOT
@@ -84,11 +30,53 @@ coords = [[-0.386695382833, 0.0424879298046, 0.0, 0.0, 0.0, -0.00250490153905, 0
           [-0.186661168817, 1.53146227893, 0.0, 0.0, 0.0, -0.998496600755, 0.0548136687429],  #Index 7 Rainbow Road
           [0.425864884563, 1.56001601173, 0.0, 0.0, 0.0, 0.95305514272, 0.302796788186]] #Index 8 iFly/Luge
 
+# Callback function definitions
+def active_cb(extra = 0):
+    rospy.loginfo("Goal pose being processed")
 
+# the callback for monitoring the progress of the navigation goal. It checks for the presence of a message on the "/stopButton" topic, 
+# which presumably signals the user wants to stop the current navigation goal. 
+# If the message with data 10 is received, it calls the stop() function.
+def feedback_cb(feedback):
+    print("press s to stop")
+    myval = rospy.wait_for_message('/stopButton', Int8)
+    
+    if myval.data == 10:
+        print(myval)
+        stop()
+
+# the callback called when the navigation goal reaches a final state (either succeeded, aborted, or canceled). 
+# It logs information based on the status received.
+def done_cb(status, result):
+    if status == 3:
+        rospy.loginfo("Goal reached")
+    if status == 2 or status == 8:
+        rospy.loginfo("Goal cancelled")
+    if status == 4:
+        rospy.loginfo("Goal aborted")
+
+
+# Function definitions
+
+# waits for a message on the topic "/button" (a topic that presumably receives button presses or commands). 
+# Once a message is received, it returns the data from the message (the index of the area to navigate to) and stores it in the command variable.
+def gui_listener():
+
+    message = rospy.wait_for_message('/button', Int8)
+    return_val = message.data
+    return return_val
+    
+# creates a SimpleActionClient for the "move_base" action server (used for navigation) and sends a request to cancel all active goals, effectively stopping the robot's movement.
+def stop():
+    navclient = actionlib.SimpleActionClient('move_base',MoveBaseAction)
+    print("Stop goal sent")
+    navclient.cancel_all_goals()
+    
+# to send the navigation goal to the action server using a separate thread.
 def navclient_thread(navclient, goal):
    navclient.send_goal(goal, done_cb, active_cb, feedback_cb)
 
-
+# to wait for the result of the navigation goal using a separate thread
 def result_thread(navclient):
     finished = navclient.wait_for_result()
     if not finished:
@@ -96,6 +84,9 @@ def result_thread(navclient):
     else:
         rospy.loginfo ( navclient.get_result())
 
+# initializes the SimpleActionClient for the "move_base" action server, waits for the server to be available, 
+# creates a navigation goal based on the provided coordList, and sends the goal to the server using a separate thread. 
+# Then, it waits for the result of the navigation goal using another thread.
 def sui(coordList):
     navclient = actionlib.SimpleActionClient('move_base',MoveBaseAction)
     rospy.loginfo("waiting for server")
